@@ -1,0 +1,311 @@
+﻿using DemoIdentity.DTO;
+using DemoIdentity.Helpers;
+using DemoIdentity.Model;
+using DemoIdentity.Services.MailService;
+using DemoIdentity.Setting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+
+namespace DemoIdentity.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class SpatuimAuthController : ControllerBase
+    {
+        private readonly UserManager<AppUser> userManager;
+        private readonly RoleManager<AppRole> roleManager;
+        private readonly IConfiguration configuration;
+        private readonly IMailService mailService;
+        private readonly DemoContext context;
+        private readonly JWTSetting jwtSetting;
+
+        public SpatuimAuthController(UserManager<AppUser> userManager,
+            RoleManager<AppRole> roleManager , 
+            IConfiguration configuration , IMailService mailService ,DemoContext context ,
+            IOptions<JWTSetting> jwtSetting)
+        {
+            this.userManager = userManager;
+            this.roleManager = roleManager;
+            this.configuration = configuration;
+            this.mailService = mailService;
+            this.context = context;
+            this.jwtSetting = jwtSetting.Value;
+        }
+        [HttpPost("Register-F1")]
+        public async Task<IActionResult> Register(SpatuimDTORefgister registerDto)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    AppUser user = new AppUser();
+                    user.FullName = registerDto.FullName;
+                    user.UserName = registerDto.Email;
+                    user.NormalizedUserName = registerDto.Email.ToUpper();
+                    user.Email = registerDto.Email;
+                    user.NormalizedEmail = registerDto.Email.ToUpper();
+
+                    user.EmailConfirmed = false;
+                    user.OTP = OTPGenerator.GenerateOTP();
+                    user.OTPGeneratedAt = DateTime.Now;
+                    var role = roleManager.Roles.FirstOrDefault();
+                    IdentityResult result = await userManager.
+                      CreateAsync(user, registerDto.Password);
+
+                    IdentityResult r = await userManager.AddToRoleAsync(user, role.Name);
+
+                    await context.SaveChangesAsync();
+
+                    if (result.Succeeded && r.Succeeded)
+                    {
+                        bool flag = await mailService.SendMail(user.Email, "SpatuimSW OTP", user.OTP);
+                        if (flag)
+                        {
+                            return Ok($"Go to Your Mail {user.Email}");
+                        }
+                        else
+                        {
+                            return BadRequest();
+                        }
+
+                    }
+                    else
+                    {
+                        return BadRequest(result.Errors.FirstOrDefault());
+                    }        
+                }
+                return BadRequest(ModelState);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+
+            }
+         
+        }
+
+
+        [HttpPost("Register-F2")]
+        public async Task<IActionResult> ConfirmOTP(ConfirmOTP confirmOTP)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    var modeluser = await userManager.FindByEmailAsync(confirmOTP.Email);
+                    if (modeluser == null)
+                    {
+                        return BadRequest("Invalid User");
+                    }
+                    var validto = modeluser.OTPGeneratedAt.Value.AddMinutes(6);
+                    if(DateTime.Now > validto)
+                    {
+                       return BadRequest("Invalid Time ");
+                    }
+                    if(modeluser.OTP != confirmOTP.OTP)
+                    {
+                        return BadRequest("Invalid OTP ");
+
+                    }
+
+                    modeluser.OTP = string.Empty;
+                    modeluser.OTPGeneratedAt = DateTime.MinValue;
+                    modeluser.EmailConfirmed = true;
+                    await context.SaveChangesAsync();
+                    return Ok("User Confimed Successfuly");
+
+
+                }
+                else
+                {
+                    return BadRequest(ModelState);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+
+        [HttpPost("ResendOTP")]
+        public async Task<IActionResult> ResendOTP(ResendOTPDto resendOTPDto)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    var modeluser = await userManager.FindByEmailAsync(resendOTPDto.Email);
+                    if (modeluser == null || modeluser.EmailConfirmed == true)
+                    {
+                        return BadRequest("Invalid User");
+                    }
+                    modeluser.OTP = OTPGenerator.GenerateOTP();
+                    modeluser.OTPGeneratedAt = DateTime.Now;
+                   await context.SaveChangesAsync();
+                    bool flag = await mailService.SendMail(modeluser.Email, "SpatuimSW OTP", modeluser.OTP);
+                    if (flag)
+                    {
+                        return Ok($"Go to Your Mail {modeluser.Email}");
+                    }
+                    else
+                    {
+                        return BadRequest();
+                    }
+                }
+                else
+                {
+                    return BadRequest(ModelState);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [HttpPost("Login")]
+        public async Task<IActionResult> Login(LoginSpatuimDTO loginSpatuim)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    var modeluser = await userManager.FindByEmailAsync(loginSpatuim.Email);
+                    if (modeluser != null || modeluser.EmailConfirmed == false)
+                    {
+                        if (await userManager.CheckPasswordAsync(modeluser, loginSpatuim.Password))
+                        {
+                         
+
+                            List<Claim> myClaims = new List<Claim>();
+                            myClaims.Add(new Claim(ClaimTypes.NameIdentifier, modeluser.Id));
+                            myClaims.Add(new Claim(ClaimTypes.Name, modeluser.Email));
+                            myClaims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
+
+                            var roles = await userManager.GetRolesAsync(modeluser);
+                            if (roles != null)
+                            {
+                                foreach (var role in roles)
+                                {
+                                    myClaims.Add(new Claim(ClaimTypes.Role, role));
+
+                                }
+                            }
+                            SymmetricSecurityKey key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSetting.Key));
+                            SigningCredentials credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+                            JwtSecurityToken myToken = new JwtSecurityToken(
+                                issuer: jwtSetting.Issuer,
+                                audience: jwtSetting.Audience,
+                                expires: DateTime.Now.AddHours(jwtSetting.ValidTo),
+                                claims: myClaims,
+                                signingCredentials: credentials
+                                );
+
+                            var token = new JwtSecurityTokenHandler().WriteToken(myToken);
+                            return Ok(new
+                            {
+                                Token = token,
+                                Exp = myToken.ValidTo
+                            });
+                        }
+                        return BadRequest("Invalid Password");
+
+                    }
+                    return BadRequest("Invalid UserName");
+                }
+                return BadRequest(ModelState);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [HttpPost("ForgetPassword")]
+        public async Task<IActionResult> ForgetPassword(ForgetPasswordDTO forgetPasswordDTO)
+        {
+            try
+            {
+                if (ModelState.IsValid )
+                {
+                    var modeluser = await userManager.FindByEmailAsync(forgetPasswordDTO.Email);
+                    if (modeluser == null )
+                    {
+                        return BadRequest("Invalid User");
+                    }
+                    modeluser.OTP = OTPGenerator.GenerateOTP();
+                    modeluser.OTPGeneratedAt = DateTime.Now;
+                    // mail confirm to false
+                    modeluser.EmailConfirmed = false;
+                    await context.SaveChangesAsync();
+                    bool flag = await mailService.SendMail(modeluser.Email, "SpatuimSW OTP", modeluser.OTP);
+                    if (flag)
+                    {
+                        return Ok($"Go to Your Mail  {modeluser.Email}");
+                    }
+                    else
+                    {
+                        return BadRequest();
+                    }
+                }
+                else
+                {
+                    return BadRequest(ModelState);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [HttpPost("ChangePassword")]
+        public async Task<IActionResult> ChangePassword(ChangePasswordDTO changePasswordDTO)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    var modeluser = await userManager.FindByEmailAsync(changePasswordDTO.Email);
+                    if (modeluser == null)
+                    {
+                        return BadRequest("Invalid User");
+                    }
+                IdentityResult result =   await userManager.ChangePasswordAsync(modeluser , modeluser.PasswordHash , changePasswordDTO.NewPassword);
+                    
+
+                    //var token = await userManager.GeneratePasswordResetTokenAsync(modeluser);
+                    //var result = await userManager.ResetPasswordAsync(user, token, model.Password);
+
+                    //IdentityResult result = await userManager.ResetPasswordAsync(modeluser, token, changePasswordDTO.NewPassword);
+                    if (result.Succeeded)
+                    {
+                        return Ok("Password Changed");
+                    }
+                    else
+                    {
+                        return BadRequest("error");
+                    }
+
+                }
+                else
+                {
+                    return BadRequest(ModelState);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+    }
+}
