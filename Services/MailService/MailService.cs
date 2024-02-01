@@ -50,8 +50,8 @@ namespace DemoIdentity.Services.MailService
             email.From.Add(new MailboxAddress(mailSetting.DisplayName, mailSetting.Email));
              
           using var smtp = new SmtpClient();
-            smtp.Connect(mailSetting.Host, mailSetting.Port, SecureSocketOptions.StartTls);
-            smtp.Authenticate(mailSetting.Email, mailSetting.Password);
+           await smtp.ConnectAsync(mailSetting.Host, mailSetting.Port, SecureSocketOptions.StartTls);
+           await smtp.AuthenticateAsync(mailSetting.Email, mailSetting.Password);
             var result = await smtp.SendAsync(email);
           
             smtp.Disconnect(true);

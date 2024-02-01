@@ -61,6 +61,7 @@ namespace DemoIdentity.Controllers
 
                     IdentityResult r = await userManager.AddToRoleAsync(user, role.Name);
 
+                   
                     await context.SaveChangesAsync();
 
                     if (result.Succeeded && r.Succeeded)
@@ -118,6 +119,7 @@ namespace DemoIdentity.Controllers
                     modeluser.OTP = string.Empty;
                     modeluser.OTPGeneratedAt = DateTime.MinValue;
                     modeluser.EmailConfirmed = true;
+                 
                     await context.SaveChangesAsync();
                     return Ok("User Confimed Successfuly");
 
@@ -186,8 +188,8 @@ namespace DemoIdentity.Controllers
                          
 
                             List<Claim> myClaims = new List<Claim>();
-                            myClaims.Add(new Claim(ClaimTypes.NameIdentifier, modeluser.Id));
-                            myClaims.Add(new Claim(ClaimTypes.Name, modeluser.Email));
+                           // myClaims.Add(new Claim(ClaimTypes.NameIdentifier, modeluser.));
+                            myClaims.Add(new Claim(ClaimTypes.Email, modeluser.Email));
                             myClaims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
 
                             var roles = await userManager.GetRolesAsync(modeluser);
