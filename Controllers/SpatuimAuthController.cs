@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
+using System.Net;
 using System.Security.Claims;
 using System.Text;
 
@@ -91,7 +92,7 @@ namespace DemoIdentity.Controllers
         }
 
 
-        [HttpPost("Register-F2")]
+        [HttpPost("Register-F2")] // Confirm otp when register & forget password 
         public async Task<IActionResult> ConfirmOTP(ConfirmOTP confirmOTP)
         {
             try
@@ -103,7 +104,7 @@ namespace DemoIdentity.Controllers
                     {
                         return BadRequest("Invalid User");
                     }
-                    var validto = modeluser.OTPGeneratedAt.Value.AddMinutes(6);
+                    var validto = modeluser.OTPGeneratedAt.Value.AddMinutes(20);
                     if(DateTime.Now > validto)
                     {
                        return BadRequest("Invalid Time ");
@@ -245,11 +246,20 @@ namespace DemoIdentity.Controllers
                     modeluser.OTPGeneratedAt = DateTime.Now;
                     // mail confirm to false
                     modeluser.EmailConfirmed = false;
+
                     await context.SaveChangesAsync();
+                    // generate token 
+                    var token = await userManager.GeneratePasswordResetTokenAsync(modeluser);
+                    var code = WebUtility.UrlEncode(token);
+                    
                     bool flag = await mailService.SendMail(modeluser.Email, "SpatuimSW OTP", modeluser.OTP);
                     if (flag)
                     {
-                        return Ok($"Go to Your Mail  {modeluser.Email}");
+                        return Ok( new
+                        {
+                           Message =  $"Go to Your Mail  {modeluser.Email}",
+                           Code = code
+                        });
                     }
                     else
                     {
@@ -270,6 +280,7 @@ namespace DemoIdentity.Controllers
         [HttpPost("ChangePassword")]
         public async Task<IActionResult> ChangePassword(ChangePasswordDTO changePasswordDTO)
         {
+
             try
             {
                 if (ModelState.IsValid)
@@ -279,13 +290,11 @@ namespace DemoIdentity.Controllers
                     {
                         return BadRequest("Invalid User");
                     }
-                IdentityResult result =   await userManager.ChangePasswordAsync(modeluser , modeluser.PasswordHash , changePasswordDTO.NewPassword);
-                    
 
-                    //var token = await userManager.GeneratePasswordResetTokenAsync(modeluser);
-                    //var result = await userManager.ResetPasswordAsync(user, token, model.Password);
 
-                    //IdentityResult result = await userManager.ResetPasswordAsync(modeluser, token, changePasswordDTO.NewPassword);
+                    var code = WebUtility.UrlDecode(changePasswordDTO.Code);
+
+                    IdentityResult result = await userManager.ResetPasswordAsync(modeluser, code, changePasswordDTO.NewPassword);
                     if (result.Succeeded)
                     {
                         return Ok("Password Changed");

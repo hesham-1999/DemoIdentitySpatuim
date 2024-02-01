@@ -3,6 +3,7 @@ using DemoIdentity.Model;
 using DemoIdentity.Services.MailService;
 using DemoIdentity.Setting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,7 +41,7 @@ namespace DemoIdentity
                 );
 
             builder.Services.AddIdentity<AppUser, AppRole>()
-           .AddEntityFrameworkStores<DemoContext>();
+           .AddEntityFrameworkStores<DemoContext>().AddDefaultTokenProviders();
             builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("MailSettings"));
             builder.Services.Configure<JWTSetting>(builder.Configuration.GetSection("JWTSetting"));
             builder.Services.AddTransient<IMailService, MailService>();

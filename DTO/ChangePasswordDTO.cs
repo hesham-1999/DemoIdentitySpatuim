@@ -6,6 +6,8 @@ namespace DemoIdentity.DTO
     {
         [Required(ErrorMessage = "Email Is Required ")]
         public string Email { get; set; }
+
+        public string Code { get; set; }
         [Required(ErrorMessage = " New Password Is Required ")]
         public string NewPassword { get; set; }
 
